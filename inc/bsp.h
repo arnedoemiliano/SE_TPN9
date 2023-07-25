@@ -30,6 +30,7 @@ SPDX-License-Identifier: MIT
 
 #include <digital.h>
 #include <pantalla.h>
+#include "hal.h"
 
 /* === Cabecera C++ ============================================================================ */
 
@@ -63,7 +64,7 @@ typedef board_s * board_t;
 /* === Public function declarations ============================================================ */
 
 board_t BoardCreate(void);
-void SisTick_Init(uint16_t ticks);
+// void SisTick_Init(uint16_t ticks);
 
 /* === End of documentation ==================================================================== */
 

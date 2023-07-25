@@ -108,7 +108,7 @@ void BoardSetup(void) {
     SystemCoreClockUpdate();
 
 #if defined(USE_HAL)
-    GpioSetDirection(LED, true);
+    // GpioSetDirection(LED, true);
 #elif defined(USE_DRIVERS)
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 

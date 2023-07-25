@@ -29,6 +29,7 @@ SPDX-License-Identifier: MIT
 #include "ciaa.h"
 #include "bsp.h"
 #include "poncho.h"
+#include "board.h"
 
 /* === Macros definitions ====================================================================== */
 //! Cantidad de digitos que se crearan
@@ -170,7 +171,7 @@ void DigitTurnOn(uint8_t digits) {
 /* === Public function implementation ========================================================== */
 
 board_t BoardCreate(void) {
-
+    BoardSetup();
     digits_init();
     segments_init();
     buzzer_init();
@@ -187,7 +188,7 @@ board_t BoardCreate(void) {
 
     return &board;
 }
-
+/*
 void SisTick_Init(uint16_t ticks) {
 
     __asm volatile("cpsid i"); // desactiva las interrupciones
@@ -198,6 +199,7 @@ void SisTick_Init(uint16_t ticks) {
 
     __asm volatile("cpsie i");
 }
+*/
 
 /* === End of documentation ==================================================================== */
 
