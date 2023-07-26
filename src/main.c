@@ -88,7 +88,7 @@ typedef enum {
 } modo_t;
 
 typedef struct key_s {
-    uint8_t key_bit;
+    uint16_t key_bit;
     // uint8_t mode;
     function_t funcion;
 } * key_t;
@@ -113,18 +113,17 @@ void CambiarModo(modo_t modo);
 void IncrementarBCD(uint8_t numero[2], const uint8_t limite[2]);
 // limite indica donde se pasa despues de restar 1 a 00
 void DecrementarBCD(uint8_t numero[2], const uint8_t limite[2]);
-/*
+
 void AcceptKeyLogic(void);
 void CancelKeyLogic(void);
 void F1KeyLogic(void);
 void F2KeyLogic(void);
 void F3KeyLogic(void);
 void F4KeyLogic(void);
-*/
 
 /* === Public variable definitions ============================================================= */
 modo_t modo;
-// EventGroupHandle_t key_group_handle;
+EventGroupHandle_t key_group_handle;
 // SemaphoreHandle_t mode_mutex;
 /* === Private variable definitions ============================================================ */
 
@@ -203,37 +202,34 @@ void DecrementarBCD(uint8_t numero[2], const uint8_t limite[2]) {
         numero[0]--;
     }
 }
-/*
+
 void AcceptKeyLogic(void) {
 
     // ACEPTAR
-    if (DigitalInputHasActivated(board->accept)) {
-        if (modo == SIN_CONFIGURAR) {
-        }
 
-        if (modo == AJUSTANDO_MINUTOS_ACTUAL) {
-            cnt_idle = MAX_IDLE_TIME;
-            CambiarModo(AJUSTANDO_HORAS_ACTUAL);
-        } else if (modo == AJUSTANDO_MINUTOS_ALARMA) {
-            cnt_idle = MAX_IDLE_TIME;
-            CambiarModo(AJUSTANDO_HORAS_ALARMA);
-        } else if (modo == AJUSTANDO_HORAS_ACTUAL) {
-            CambiarModo(MOSTRANDO_HORA);
-            SetClockTime(reloj, temp_input, sizeof(temp_input));
-        } else if (modo == AJUSTANDO_HORAS_ALARMA) {
-            DisplayClearDot(board->display, DOT_0 | DOT_1 | DOT_2);
-            SetAlarmTime(reloj, temp_input);
-            CambiarModo(MOSTRANDO_HORA);
-        } else if (modo == MOSTRANDO_HORA) {
-            if (!GetAlarmTime(reloj, temp_input)) {
-                ToggleHabAlarma(reloj);
-                DisplaySetDot(board->display, DOT_3);
-            } else if (alarma_sonando) {
-                PosponerAlarma(reloj, 5);
-            }
+    if (modo == AJUSTANDO_MINUTOS_ACTUAL) {
+        cnt_idle = MAX_IDLE_TIME;
+        CambiarModo(AJUSTANDO_HORAS_ACTUAL);
+    } else if (modo == AJUSTANDO_MINUTOS_ALARMA) {
+        cnt_idle = MAX_IDLE_TIME;
+        CambiarModo(AJUSTANDO_HORAS_ALARMA);
+    } else if (modo == AJUSTANDO_HORAS_ACTUAL) {
+        CambiarModo(MOSTRANDO_HORA);
+        SetClockTime(reloj, temp_input, sizeof(temp_input));
+    } else if (modo == AJUSTANDO_HORAS_ALARMA) {
+        DisplayClearDot(board->display, DOT_0 | DOT_1 | DOT_2);
+        SetAlarmTime(reloj, temp_input);
+        CambiarModo(MOSTRANDO_HORA);
+    } else if (modo == MOSTRANDO_HORA) {
+        if (!GetAlarmTime(reloj, temp_input)) {
+            ToggleHabAlarma(reloj);
+            DisplaySetDot(board->display, DOT_3);
+        } else if (alarma_sonando) {
+            PosponerAlarma(reloj, 5);
         }
     }
 }
+
 void CancelKeyLogic(void) {
     if (modo == AJUSTANDO_MINUTOS_ACTUAL || modo == AJUSTANDO_MINUTOS_ALARMA) {
         if (GetClockTime(reloj, temp_input, sizeof(temp_input))) {
@@ -259,7 +255,10 @@ void CancelKeyLogic(void) {
         }
     }
 }
-void F1KeyLogic(void) {
+// SET-TIME
+void F4KeyLogic(void) {
+    Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
+
     flag_set_time_alarm ^= 1;
     if (cnt_set_time_alarm == 0) {
         flag_idle = true;
@@ -270,7 +269,8 @@ void F1KeyLogic(void) {
         DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
     }
 }
-void F2KeyLogic(void) {
+// SET-ALARM
+void F3KeyLogic(void) {
     flag_set_time_alarm ^= 1;
     if (cnt_set_time_alarm == 0 && modo != SIN_CONFIGURAR) {
         flag_idle = true;
@@ -281,7 +281,8 @@ void F2KeyLogic(void) {
         DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
     }
 }
-void F3KeyLogic(void) {
+// DECREMENT
+void F2KeyLogic(void) {
     cnt_idle = MAX_IDLE_TIME;
     if (modo == AJUSTANDO_MINUTOS_ACTUAL || modo == AJUSTANDO_MINUTOS_ALARMA) {
         DecrementarBCD(&temp_input[2], limite_min);
@@ -290,7 +291,8 @@ void F3KeyLogic(void) {
     }
     DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
 }
-void F4KeyLogic(void) {
+// INCREMENT
+void F1KeyLogic(void) {
     cnt_idle = MAX_IDLE_TIME;
     if (modo == AJUSTANDO_MINUTOS_ACTUAL || modo == AJUSTANDO_MINUTOS_ALARMA) {
         // le paso el puntero a los dos digitos menos significativos
@@ -306,8 +308,14 @@ static void KeyTask(void * object) {
     uint16_t events, current_state, last_state, changes;
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(150));
+        vTaskDelay(pdMS_TO_TICKS(50));
 
+        if (DigitalInputGetState(board->accept)) {
+            current_state |= EVENT_ACCEPT_ON;
+        }
+        if (DigitalInputGetState(board->cancel)) {
+            current_state |= EVENT_CANCEL_ON;
+        }
         if (DigitalInputGetState(board->set_time)) {
             current_state |= EVENT_F1_ON;
         }
@@ -317,11 +325,15 @@ static void KeyTask(void * object) {
         if (DigitalInputGetState(board->decrement)) {
             current_state |= EVENT_F3_ON;
         }
+        if (DigitalInputGetState(board->increment)) {
+            current_state |= EVENT_F4_ON;
+        }
 
         changes = current_state ^ last_state;
         last_state = current_state;
         events = ((changes & !current_state) << 6) | (changes & current_state);
         xEventGroupSetBits(key_group_handle, events);
+        current_state = 0;
     }
 }
 
@@ -329,6 +341,7 @@ static void ModeTask(void * object) {
     key_t options = object;
     while (1) {
         xEventGroupWaitBits(key_group_handle, options->key_bit, TRUE, FALSE, portMAX_DELAY);
+
         options->funcion();
     }
 }
@@ -340,14 +353,13 @@ static void RefreshTask(void * object) {
         DisplayRefresh(board->display);
     }
 }
-*/
+
 static void DisplayTask(void * object) {
     uint8_t hora[RES_DISPLAY_RELOJ];
     while (true) {
-        Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        //(void)GetClockTime(reloj, hora, RES_DISPLAY_RELOJ);
-        // DisplayWriteBCD(board->display, hora, sizeof(hora));
+
+        (void)GetClockTime(reloj, hora, RES_DISPLAY_RELOJ);
+        DisplayWriteBCD(board->display, hora, sizeof(hora));
     }
 }
 
@@ -361,22 +373,21 @@ int main(void) {
     Chip_GPIO_SetPinDIR(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT, true);
 
     // reloj = ClockCreate(TICKS_PER_SECOND, ActivarAlarma);
-    // board = BoardCreate();
-    //  modo = SIN_CONFIGURAR;
+    modo = SIN_CONFIGURAR;
 
     static struct key_s key[6];
     key[0].key_bit = EVENT_F1_ON;
-    // key[0].funcion = F1KeyLogic;
+    key[0].funcion = F1KeyLogic;
     key[1].key_bit = EVENT_F2_ON;
-    // key[1].funcion = F2KeyLogic;
+    key[1].funcion = F2KeyLogic;
     key[2].key_bit = EVENT_F3_ON;
-    // key[2].funcion = F3KeyLogic;
+    key[2].funcion = F3KeyLogic;
     key[3].key_bit = EVENT_F4_ON;
-    // key[3].funcion = F4KeyLogic;
+    key[3].funcion = F4KeyLogic;
     key[4].key_bit = EVENT_ACCEPT_ON;
-    // key[4].funcion = AcceptKeyLogic;
+    key[4].funcion = AcceptKeyLogic;
     key[5].key_bit = EVENT_CANCEL_ON;
-    // key[5].funcion = CancelKeyLogic;
+    key[5].funcion = CancelKeyLogic;
 
     // DisplayToggleDot(board->display, 1);
     // DisplayFlashDigits(board->display, 0, 3, 250); // cuando inicia el reloj los digitos
@@ -384,26 +395,25 @@ int main(void) {
 
     // mode_mutex = xSemaphoreCreateMutex();
 
-    // key_group_handle = xEventGroupCreate();
-    /*
+    key_group_handle = xEventGroupCreate();
+
     if (key_group_handle == NULL) {
         while (1) {
         };
     }
-    */
-    /*
-    xTaskCreate(KeyTask, "KeysReading", 1024, NULL, tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenF1", 1024, &key[0], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenF2", 1024, &key[1], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenF3", 1024, &key[2], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenF4", 1024, &key[3], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenAccept", 1024, &key[4], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenCancel", 1024, &key[5], tskIDLE_PRIORITY + 2, NULL);
-    xTaskCreate(RefreshTask, "RefreshDisplay", 1024, NULL, tskIDLE_PRIORITY + 3, NULL);
-    */
-    xTaskCreate(DisplayTask, "WriteDisplay", 256, NULL, tskIDLE_PRIORITY + 1, NULL);
+
+    xTaskCreate(KeyTask, "KeysReading", 256, NULL, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenF1", 256, &key[0], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenF2", 256, &key[1], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenF3", 256, &key[2], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenF4", 256, &key[3], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenAccept", 256, &key[4], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenCancel", 1024, &key[5], tskIDLE_PRIORITY + 1, NULL);
+    // xTaskCreate(RefreshTask, "RefreshDisplay", 1024, NULL, tskIDLE_PRIORITY + 3, NULL);
+    // xTaskCreate(DisplayTask, "WriteDisplay", 256, NULL, tskIDLE_PRIORITY + 1, NULL);
 
     vTaskStartScheduler();
+
     while (true) {
     }
     return 0;
