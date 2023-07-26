@@ -124,7 +124,7 @@ void F4KeyLogic(void);
 /* === Public variable definitions ============================================================= */
 modo_t modo;
 EventGroupHandle_t key_group_handle;
-// SemaphoreHandle_t mode_mutex;
+SemaphoreHandle_t mode_mutex;
 /* === Private variable definitions ============================================================ */
 
 /* === Private function implementation ========================================================= */
@@ -140,9 +140,9 @@ void ActivarAlarma(reloj_t reloj, bool act_desact) {
 }
 
 void CambiarModo(modo_t valor) {
-    // xSemaphoreTake(mode_mutex, portMAX_DELAY);
+    xSemaphoreTake(mode_mutex, portMAX_DELAY);
     modo = valor;
-    // xSemaphoreGive(mode_mutex);
+    xSemaphoreGive(mode_mutex);
 
     switch (modo) {
     case SIN_CONFIGURAR:
@@ -227,6 +227,8 @@ void AcceptKeyLogic(void) {
         } else if (alarma_sonando) {
             PosponerAlarma(reloj, 5);
         }
+    } else if (modo == SIN_CONFIGURAR) {
+        Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
     }
 }
 
@@ -257,10 +259,10 @@ void CancelKeyLogic(void) {
 }
 // SET-TIME
 void F4KeyLogic(void) {
-    Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
 
     flag_set_time_alarm ^= 1;
-    if (cnt_set_time_alarm == 0) {
+    if (cnt_set_time_alarm == 3) { // if (cnt_set_time_alarm == 0) cambio a 3 para test
+
         flag_idle = true;
         cnt_idle = MAX_IDLE_TIME;
         CambiarModo(AJUSTANDO_MINUTOS_ACTUAL);
@@ -371,6 +373,7 @@ int main(void) {
     Chip_SCU_PinMuxSet(LED_R_PORT, LED_R_PIN, SCU_MODE_INBUFF_EN | SCU_MODE_INACT | LED_R_FUNC);
     Chip_GPIO_SetPinState(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT, false);
     Chip_GPIO_SetPinDIR(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT, true);
+    // Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
 
     // reloj = ClockCreate(TICKS_PER_SECOND, ActivarAlarma);
     modo = SIN_CONFIGURAR;
@@ -393,7 +396,7 @@ int main(void) {
     // DisplayFlashDigits(board->display, 0, 3, 250); // cuando inicia el reloj los digitos
     // parpadean
 
-    // mode_mutex = xSemaphoreCreateMutex();
+    mode_mutex = xSemaphoreCreateMutex();
 
     key_group_handle = xEventGroupCreate();
 
