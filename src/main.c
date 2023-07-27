@@ -69,12 +69,8 @@
 #define EVENT_F4_OFF         (1 << 9)
 #define EVENT_ACCEPT_OFF     (1 << 10)
 #define EVENT_CANCEL_OFF     (1 << 11)
-
-#define LED_R_PORT           2
-#define LED_R_PIN            0
-#define LED_R_FUNC           SCU_MODE_FUNC4
-#define LED_R_GPIO           5
-#define LED_R_BIT            0
+#define BIT_0                (1 << 0)
+#define BIT_1                (1 << 1)
 
 /* === Private data type declarations ========================================================== */
 typedef void (*function_t)(void);
@@ -124,6 +120,7 @@ void F4KeyLogic(void);
 /* === Public variable definitions ============================================================= */
 modo_t modo;
 EventGroupHandle_t key_group_handle;
+EventGroupHandle_t clock_group_handle; // para controlar la verificacion de un nuevo segundo
 SemaphoreHandle_t mode_mutex;
 /* === Private variable definitions ============================================================ */
 
@@ -227,8 +224,6 @@ void AcceptKeyLogic(void) {
         } else if (alarma_sonando) {
             PosponerAlarma(reloj, 5);
         }
-    } else if (modo == SIN_CONFIGURAR) {
-        Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
     }
 }
 
@@ -238,8 +233,6 @@ void CancelKeyLogic(void) {
             CambiarModo(MOSTRANDO_HORA);
             DisplayClearDot(board->display, DOT_MASK);
         } else {
-            // DisplayClearDot(board->display, 1);
-            // DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
             CambiarModo(SIN_CONFIGURAR);
         }
     } else if (modo == AJUSTANDO_HORAS_ACTUAL) {
@@ -261,27 +254,27 @@ void CancelKeyLogic(void) {
 void F4KeyLogic(void) {
 
     flag_set_time_alarm ^= 1;
-    if (cnt_set_time_alarm == 3) { // if (cnt_set_time_alarm == 0) cambio a 3 para test
+    // if (cnt_set_time_alarm == 0) { // if (cnt_set_time_alarm == 0) cambio a 3 para test
 
-        flag_idle = true;
-        cnt_idle = MAX_IDLE_TIME;
-        CambiarModo(AJUSTANDO_MINUTOS_ACTUAL);
-        GetClockTime(reloj, temp_input, sizeof(temp_input));
-        DisplayClearDot(board->display, DOT_1);
-        DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
-    }
+    flag_idle = true;
+    cnt_idle = MAX_IDLE_TIME;
+    CambiarModo(AJUSTANDO_MINUTOS_ACTUAL);
+    GetClockTime(reloj, temp_input, sizeof(temp_input));
+    DisplayClearDot(board->display, DOT_1);
+    DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
+    //}
 }
 // SET-ALARM
 void F3KeyLogic(void) {
     flag_set_time_alarm ^= 1;
-    if (cnt_set_time_alarm == 0 && modo != SIN_CONFIGURAR) {
-        flag_idle = true;
-        cnt_idle = MAX_IDLE_TIME;
-        CambiarModo(AJUSTANDO_MINUTOS_ALARMA);
-        GetAlarmTime(reloj, temp_input);
-        DisplaySetDot(board->display, DOT_MASK);
-        DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
-    }
+    // if (cnt_set_time_alarm == 0 && modo != SIN_CONFIGURAR) {
+    flag_idle = true;
+    cnt_idle = MAX_IDLE_TIME;
+    CambiarModo(AJUSTANDO_MINUTOS_ALARMA);
+    GetAlarmTime(reloj, temp_input);
+    DisplaySetDot(board->display, DOT_MASK);
+    DisplayWriteBCD(board->display, temp_input, sizeof(temp_input));
+    //}
 }
 // DECREMENT
 void F2KeyLogic(void) {
@@ -349,34 +342,51 @@ static void ModeTask(void * object) {
 }
 
 static void RefreshTask(void * object) {
-
-    while (1) {
+    int tick;
+    while (true) {
         vTaskDelay(pdMS_TO_TICKS(1));
+        tick = RelojNuevoTick(reloj);
+        if (modo <= MOSTRANDO_HORA) {
+            if (tick == 0) {
+                xEventGroupSetBits(clock_group_handle, BIT_0);
+            } else if (tick == TICKS_PER_SECOND / 2) {
+                xEventGroupSetBits(clock_group_handle, BIT_1);
+            }
+        }
+
         DisplayRefresh(board->display);
     }
 }
 
 static void DisplayTask(void * object) {
     uint8_t hora[RES_DISPLAY_RELOJ];
-    while (true) {
+    EventBits_t ux_bits;
 
-        (void)GetClockTime(reloj, hora, RES_DISPLAY_RELOJ);
-        DisplayWriteBCD(board->display, hora, sizeof(hora));
+    while (true) {
+        ux_bits =
+            xEventGroupWaitBits(clock_group_handle, BIT_0 | BIT_1, TRUE, FALSE, portMAX_DELAY);
+        if ((ux_bits & BIT_0) != 0) {
+            (void)GetClockTime(reloj, hora, RES_DISPLAY_RELOJ);
+            DisplayWriteBCD(board->display, hora, sizeof(hora));
+            DisplayToggleDot(board->display, 1);
+        } else if ((ux_bits & BIT_1) != 0) {
+            DisplayToggleDot(board->display, 1);
+        }
     }
 }
 
 /* === Public function implementation ========================================================= */
+/*Falta completar con las pulsaciones largas y la alarma*/
 
 int main(void) {
     board = BoardCreate();
-    // SisTick_Init(INT_PER_SECOND);
-    Chip_SCU_PinMuxSet(LED_R_PORT, LED_R_PIN, SCU_MODE_INBUFF_EN | SCU_MODE_INACT | LED_R_FUNC);
-    Chip_GPIO_SetPinState(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT, false);
-    Chip_GPIO_SetPinDIR(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT, true);
-    // Chip_GPIO_SetPinToggle(LPC_GPIO_PORT, LED_R_GPIO, LED_R_BIT);
-
-    // reloj = ClockCreate(TICKS_PER_SECOND, ActivarAlarma);
+    reloj = ClockCreate(TICKS_PER_SECOND, ActivarAlarma);
+    mode_mutex = xSemaphoreCreateMutex();
+    key_group_handle = xEventGroupCreate();
+    clock_group_handle = xEventGroupCreate();
     modo = SIN_CONFIGURAR;
+    DisplayToggleDot(board->display, 1);
+    DisplayFlashDigits(board->display, 0, 3, 250);
 
     static struct key_s key[6];
     key[0].key_bit = EVENT_F1_ON;
@@ -392,14 +402,6 @@ int main(void) {
     key[5].key_bit = EVENT_CANCEL_ON;
     key[5].funcion = CancelKeyLogic;
 
-    // DisplayToggleDot(board->display, 1);
-    // DisplayFlashDigits(board->display, 0, 3, 250); // cuando inicia el reloj los digitos
-    // parpadean
-
-    mode_mutex = xSemaphoreCreateMutex();
-
-    key_group_handle = xEventGroupCreate();
-
     if (key_group_handle == NULL) {
         while (1) {
         };
@@ -411,9 +413,9 @@ int main(void) {
     xTaskCreate(ModeTask, "ChangeModeWhenF3", 256, &key[2], tskIDLE_PRIORITY + 1, NULL);
     xTaskCreate(ModeTask, "ChangeModeWhenF4", 256, &key[3], tskIDLE_PRIORITY + 1, NULL);
     xTaskCreate(ModeTask, "ChangeModeWhenAccept", 256, &key[4], tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(ModeTask, "ChangeModeWhenCancel", 1024, &key[5], tskIDLE_PRIORITY + 1, NULL);
-    // xTaskCreate(RefreshTask, "RefreshDisplay", 1024, NULL, tskIDLE_PRIORITY + 3, NULL);
-    // xTaskCreate(DisplayTask, "WriteDisplay", 256, NULL, tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(ModeTask, "ChangeModeWhenCancel", 256, &key[5], tskIDLE_PRIORITY + 1, NULL);
+    xTaskCreate(RefreshTask, "RefreshDisplay", 512, NULL, tskIDLE_PRIORITY + 3, NULL);
+    xTaskCreate(DisplayTask, "WriteDisplay", 512, NULL, tskIDLE_PRIORITY + 3, NULL);
 
     vTaskStartScheduler();
 
@@ -421,45 +423,7 @@ int main(void) {
     }
     return 0;
 }
-/*
-void SysTick_Handler(void) {
 
-    uint8_t hora[RES_DISPLAY_RELOJ];
-
-    int tick = RelojNuevoTick(reloj);
-    if (modo <= MOSTRANDO_HORA) {
-        if (tick == 0) {
-            if (flag_set_time_alarm) {
-                if (cnt_set_time_alarm) {
-                    cnt_set_time_alarm--;
-                }
-            } else {
-                // Si la bandera esta en false se reinicia la cuenta así no se acumulan los tiempos
-                // de falsas pulsaciones
-                cnt_set_time_alarm = DELAY_SET_TIME_ALARM;
-            }
-
-            (void)GetClockTime(reloj, hora, RES_DISPLAY_RELOJ);
-            DisplayWriteBCD(board->display, hora, sizeof(hora));
-            DisplayToggleDot(board->display, 1);
-            VerificarAlarma(reloj);
-        }
-        if (tick == TICKS_PER_SECOND / 2) {
-            DisplayToggleDot(board->display, 1);
-        }
-    }
-    if (modo >= AJUSTANDO_MINUTOS_ACTUAL && modo <= AJUSTANDO_HORAS_ALARMA) {
-        if (tick == 0) {
-            if (flag_idle) {
-                if (cnt_idle) {
-                    cnt_idle--;
-                }
-            }
-        }
-    }
-   XXX DisplayRefresh(board->display);
-}
-*/
 /* === End of documentation ====================================================================*/
 
 /** @} End of module definition for doxygen */
